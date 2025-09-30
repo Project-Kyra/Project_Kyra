@@ -133,15 +133,21 @@ def login():
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
     login_btn = st.button("Login")
+
     if login_btn:
         role = authenticate(username, password)
         if role:
             st.session_state.logged_in = True
             st.session_state.username = username
             st.session_state.role = role
-            st.experimental_rerun()
+            try:
+                st.experimental_rerun()
+            except Exception:
+                pass  # fail silently to avoid crash
+            return
         else:
             st.error("Invalid username or password")
+
 
 def logout():
     st.session_state.logged_in = False
