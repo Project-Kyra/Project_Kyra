@@ -1,4 +1,5 @@
 import streamlit as st
+import fitz  # PyMuPDF
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -10,7 +11,7 @@ USERS = {
     "evaluator1": {"password": "eval123", "role": "evaluator"},
 }
 
-# Dummy benchmark abstracts for novelty check
+# Benchmark abstracts for novelty scoring
 BENCHMARKS = [
     "Optimized coal mining using IoT sensors.",
     "Advanced rare earth extraction from coal ash.",
@@ -27,6 +28,24 @@ if "role" not in st.session_state:
 if "proposals" not in st.session_state:
     st.session_state.proposals = []
 
+# --- Scoring functions based on guidelines ---
+
+def extract_pdf_text(pdf_bytes) -> str:
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text()
+        return text
+    except Exception as e:
+        st.error(f"Error reading PDF: {e}")
+        return ""
+
+def score_relevance(text: str) -> float:
+    keywords = ["coal mining", "safety", "environmental sustainability", "energy efficiency",
+                "automation", "clean coal"]
+    matches = sum(1 for kw in keywords if kw in text.lower())
+    return round(100 * matches / len(keywords), 2)
 
 def score_novelty(text: str) -> float:
     documents = BENCHMARKS + [text]
@@ -35,43 +54,94 @@ def score_novelty(text: str) -> float:
     novelty_score = 1 - np.max(cos_similarities)
     return round(novelty_score * 100, 2)
 
+def score_technical_feasibility(text: str) -> float:
+    criteria = ["objective", "methodology", "timeline", "resources", "expertise", "partnership"]
+    found = sum(1 for c in criteria if c in text.lower())
+    return round(100 * found / len(criteria), 2)
 
-def score_feasibility(text: str) -> float:
-    keywords = ["AI", "ML", "sensors", "automation", "safety", "sustainability"]
-    score = sum(1 for kw in keywords if kw.lower() in text.lower()) * 20
-    return min(score, 100)
-
-
-def score_finance(budget_df: pd.DataFrame) -> (float, list):
-    max_total = 2000000
-    milestone_limit = 0.4
-    total = budget_df["Amount"].sum()
-    first_milestone = budget_df.iloc[0]["Amount"] if not budget_df.empty else 0
+def score_financial_viability(budget_df: pd.DataFrame) -> (float, list):
     issues = []
-    compliant = True
-    if total > max_total:
-        issues.append("Total budget exceeds INR 20 lakhs")
-        compliant = False
-    if total > 0 and first_milestone / total > milestone_limit:
-        issues.append("First milestone exceeds 40% of total budget")
-        compliant = False
-    return (100 if compliant else 50), issues
+    total = budget_df["Amount"].sum()
+    max_total = 2000000  # Example cap 20 Lakhs INR
+    cost_benefit_justified = True  # For demo, assume True
 
+    if total > max_total:
+        issues.append("Budget exceeds maximum allowed cap of INR 20 Lakhs.")
+    # Further cost-benefit checks can be added here
+    score = 100 if not issues else 50
+    return score, issues
+
+def score_impact_potential(text: str) -> float:
+    keywords = ["efficiency", "safety", "environment", "emissions", "clean energy"]
+    matches = sum(1 for kw in keywords if kw in text.lower())
+    return round(100 * matches / len(keywords), 2)
+
+def score_institutional_capability(text: str) -> float:
+    keywords = ["track record", "expertise", "facility", "experience"]
+    matches = sum(1 for kw in keywords if kw in text.lower())
+    return round(100 * matches / len(keywords), 2)
+
+def score_compliance_and_completeness(text: str) -> float:
+    keywords = ["forms", "annexures", "financial details", "approval", "ethical", "regulatory"]
+    matches = sum(1 for kw in keywords if kw in text.lower())
+    return round(100 * matches / len(keywords), 2)
+
+def compute_weighted_score(text: str, budget_df: pd.DataFrame):
+    r1 = score_relevance(text)         # 20%
+    r2 = score_novelty(text)           # 20%
+    r3 = score_technical_feasibility(text)  # 20%
+    r4, finance_issues = score_financial_viability(budget_df)  # 15%
+    r5 = score_impact_potential(text) # 15%
+    r6 = score_institutional_capability(text) # 5%
+    r7 = score_compliance_and_completeness(text) # 5%
+
+    weighted_score = (r1 * 0.20) + (r2 * 0.20) + (r3 * 0.20) + (r4 * 0.15) + \
+                     (r5 * 0.15) + (r6 * 0.05) + (r7 * 0.05)
+
+    if weighted_score >= 70:
+        status = "Accepted"
+        reasons = []
+    elif weighted_score >= 50:
+        status = "Conditional Acceptance (Revision Needed)"
+        reasons = finance_issues if finance_issues else ["Requires revision."]
+    else:
+        status = "Rejected"
+        reasons = finance_issues if finance_issues else ["Score below threshold."]
+
+    scores = {
+        "Relevance to CIL Goals": r1,
+        "Novelty/Innovation": r2,
+        "Technical Feasibility": r3,
+        "Financial Viability": r4,
+        "Impact Potential": r5,
+        "Institutional Capability": r6,
+        "Compliance & Completeness": r7,
+        "Overall Score": round(weighted_score, 2),
+        "Status": status,
+        "Reasons": reasons
+    }
+    return scores
+
+def authenticate(username, password):
+    user = USERS.get(username)
+    if user and user["password"] == password:
+        return user["role"]
+    return None
 
 def login():
     st.title("NaCCER Proposal Evaluation System")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
-    if st.button("Login"):
-        user = USERS.get(username)
-        if user and password == user["password"]:
+    login_btn = st.button("Login")
+    if login_btn:
+        role = authenticate(username, password)
+        if role:
             st.session_state.logged_in = True
             st.session_state.username = username
-            st.session_state.role = user["role"]
+            st.session_state.role = role
             st.experimental_rerun()
         else:
             st.error("Invalid username or password")
-
 
 def logout():
     st.session_state.logged_in = False
@@ -79,119 +149,98 @@ def logout():
     st.session_state.role = ""
     st.experimental_rerun()
 
-
 def company_dashboard():
     st.header(f"Welcome, {st.session_state.username} (Company)")
+
     with st.form("proposal_form"):
-        title = st.text_input("Proposal Title", key="title")
-        abstract = st.text_area("Proposal Abstract", key="abstract")
-        budget_file = st.file_uploader("Upload Budget CSV (must have 'Amount' column)", type=["csv"], key="budget")
-        submitted = st.form_submit_button("Submit Proposal")
-        if submitted:
-            if not title or not abstract:
-                st.error("Please fill Title and Abstract")
+        pdf_file = st.file_uploader("Upload Proposal PDF", type=["pdf"], key="pdf")
+        budget_file = st.file_uploader(
+            "Upload Budget CSV (with 'Amount' column)", type=["csv"], key="budget"
+        )
+        submit = st.form_submit_button("Submit Proposal")
+
+        if submit:
+            if pdf_file is None:
+                st.error("Please upload the proposal PDF.")
                 return
-            if not budget_file:
-                st.error("Please upload budget CSV")
+            if budget_file is None:
+                st.error("Please upload the budget CSV file.")
                 return
-            budget_df = pd.read_csv(budget_file)
+
+            proposal_text = extract_pdf_text(pdf_file.read())
+            if not proposal_text.strip():
+                st.error("Could not extract text from PDF.")
+                return
+
+            try:
+                budget_df = pd.read_csv(budget_file)
+            except Exception as e:
+                st.error(f"Error reading budget CSV: {e}")
+                return
+
             if "Amount" not in budget_df.columns:
-                st.error("CSV must contain 'Amount' column")
+                st.error("Budget CSV must contain 'Amount' column.")
                 return
-            novelty = score_novelty(abstract)
-            feasibility = score_feasibility(abstract)
-            finance_score, issues = score_finance(budget_df)
-            prop = {
+
+            scores = compute_weighted_score(proposal_text, budget_df)
+
+            new_prop = {
                 "id": len(st.session_state.proposals) + 1,
-                "title": title,
-                "abstract": abstract,
-                "budget": budget_df.to_dict(),
-                "novelty": novelty,
-                "feasibility": feasibility,
-                "finance_score": finance_score,
-                "alerts": issues,
+                "text": proposal_text,
+                "scores": scores,
                 "user": st.session_state.username,
-                "status": "Submitted",
-                "evaluator": "evaluator1",
+                "status": scores["Status"],
                 "eval_comment": "",
             }
-            st.session_state.proposals.append(prop)
-            st.success("Proposal submitted successfully!")
-            st.write(f"Novelty Score: {novelty}/100")
-            st.write(f"Feasibility Score: {feasibility}/100")
-            st.write(f"Financial Compliance Score: {finance_score}/100")
-            if issues:
-                st.warning("Alerts:")
-                for issue in issues:
-                    st.write("- " + issue)
-    st.subheader("Your Proposals")
-    props = [p for p in st.session_state.proposals if p["user"] == st.session_state.username]
-    for p in props:
-        st.markdown(f"**{p['title']}** - Status: {p['status']}")
-        st.write(f"Novelty: {p['novelty']} | Feasibility: {p['feasibility']} | Finance: {p['finance_score']}")
+
+            st.session_state.proposals.append(new_prop)
+            st.success(f"Proposal submitted. Status: {scores['Status']}")
+
+    st.subheader("Your Submitted Proposals")
+    user_props = [p for p in st.session_state.proposals if p["user"] == st.session_state.username]
+    for p in user_props:
+        st.markdown(f"**Proposal #{p['id']}** - Status: {p['status']}")
+        for k, v in p["scores"].items():
+            if k not in ["Reasons", "Status"]:
+                st.write(f"{k}: {v}")
+        if p["scores"]["Reasons"]:
+            st.warning("Reasons:")
+            for r in p["scores"]["Reasons"]:
+                st.write("- " + r)
         if p["eval_comment"]:
             st.info(f"Evaluator Comments: {p['eval_comment']}")
-
 
 def admin_dashboard():
     st.header(f"Welcome, {st.session_state.username} (Admin)")
     st.subheader("All Proposals")
     for p in st.session_state.proposals:
-        st.markdown(
-            f"**{p['title']}** by {p['user']} | Status: {p['status']}<br>"
-            f"Novelty: {p['novelty']} | Feasibility: {p['feasibility']} | Finance: {p['finance_score']}",
-            unsafe_allow_html=True,
-        )
-        if p["alerts"]:
-            st.error("Alerts: " + ", ".join(p["alerts"]))
+        st.markdown(f"**Proposal #{p['id']}** by {p['user']} - Status: {p['status']}")
+        for k, v in p["scores"].items():
+            if k not in ["Reasons", "Status"]:
+                st.write(f"{k}: {v}")
+        if p["scores"]["Reasons"]:
+            st.error("Alerts: " + ", ".join(p["scores"]["Reasons"]))
         if p["eval_comment"]:
-            st.info(f"Evaluator: {p['evaluator']} | Comments: {p['eval_comment']}")
-    st.subheader("Users")
-    for u, v in USERS.items():
-        st.write(f"{u} ({v['role']})")
-
+            st.info(f"Evaluator Comments: {p['eval_comment']}")
 
 def evaluator_dashboard():
     st.header(f"Welcome, {st.session_state.username} (Evaluator)")
-    assigned = [p for p in st.session_state.proposals if p["evaluator"] == st.session_state.username]
-    if not assigned:
-        st.info("No proposals assigned.")
-        return
-    for p in assigned:
-        st.markdown(
-            f"**{p['title']}** by {p['user']} | Status: {p['status']}<br>"
-            f"Novelty: {p['novelty']} | Feasibility: {p['feasibility']} | Finance: {p['finance_score']}",
-            unsafe_allow_html=True,
-        )
-        st.text_area("Evaluator Comments", value=p["eval_comment"], key=f"comment_{p['id']}")
-        status = st.selectbox(
-            "Update Status",
-            options=["Submitted", "Accepted", "Rejected", "Needs Revision"],
-            index=["Submitted", "Accepted", "Rejected", "Needs Revision"].index(p["status"]),
-            key=f"status_{p['id']}",
-        )
-        if st.button(f"Submit Review for Proposal #{p['id']}", key=f"submit_{p['id']}"):
-            comment_key = f"comment_{p['id']}"
-            p["eval_comment"] = st.session_state[comment_key]
-            p["status"] = status
-            st.success(f"Proposal #{p['id']} review updated.")
-
+    st.info("Evaluator panel coming soon.")
 
 def main():
     if not st.session_state.logged_in:
         login()
     else:
-        role = st.session_state.role
+        st.sidebar.write(f"Logged in as: {st.session_state.username} ({st.session_state.role})")
         if st.sidebar.button("Logout"):
             logout()
-        st.sidebar.write(f"Logged in as: {st.session_state.username} ({role})")
-        if role == "admin":
-            admin_dashboard()
-        elif role == "company":
+        role = st.session_state.role
+        if role == "company":
             company_dashboard()
+        elif role == "admin":
+            admin_dashboard()
         elif role == "evaluator":
             evaluator_dashboard()
-
 
 if __name__ == "__main__":
     main()
