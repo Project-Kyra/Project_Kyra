@@ -106,25 +106,18 @@ def authenticate(username, password):
     return None
 
 def login():
-    st.title("NaCCER Proposal Evaluation System")
+    st.title("NaCCER Proposal Evaluation")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
-    login_btn = st.button("Login")
-
-    if login_btn:
+    if st.button("Login"):
         role = authenticate(username, password)
         if role:
             st.session_state.logged_in = True
             st.session_state.username = username
             st.session_state.role = role
-            try:
-                st.experimental_rerun()
-            except Exception:
-                pass  # fail silently to avoid crash
-            return
+            st.experimental_rerun()
         else:
             st.error("Invalid username or password")
-
 
 def logout():
     st.session_state.logged_in = False
@@ -185,14 +178,33 @@ def company_dashboard():
 
 def admin_dashboard():
     st.header(f"Welcome, {st.session_state.username} (Admin)")
-    st.subheader("All Proposals")
+
+    total_props = len(st.session_state.proposals)
+    accepted = len([p for p in st.session_state.proposals if p["status"] == "Accepted"])
+    conditional = len([p for p in st.session_state.proposals if "Conditional" in p["status"]])
+    rejected = len([p for p in st.session_state.proposals if p["status"] == "Rejected"])
+
+    st.subheader("Summary Statistics")
+    st.write(f"Total proposals submitted: {total_props}")
+    st.write(f"Accepted proposals: {accepted}")
+    st.write(f"Conditional acceptance: {conditional}")
+    st.write(f"Rejected proposals: {rejected}")
+
+    st.subheader("Proposals with Alerts")
+    alerted_props = [p for p in st.session_state.proposals if p["scores"]["Reasons"]]
+    if alerted_props:
+        for p in alerted_props:
+            st.markdown(f"**Proposal #{p['id']}** by {p['user']} - Status: {p['status']}")
+            st.error("Alerts: " + ", ".join(p["scores"]["Reasons"]))
+    else:
+        st.write("No alerts currently.")
+
+    st.subheader("All Proposals Detail")
     for p in st.session_state.proposals:
         st.markdown(f"**Proposal #{p['id']}** by {p['user']} - Status: {p['status']}")
         for k, v in p["scores"].items():
             if k not in ["Reasons", "Status"]:
                 st.write(f"{k}: {v}")
-        if p["scores"]["Reasons"]:
-            st.error("Alerts: " + ", ".join(p["scores"]["Reasons"]))
         if p["eval_comment"]:
             st.info(f"Evaluator Comment: {p['eval_comment']}")
 
@@ -207,11 +219,12 @@ def main():
         st.sidebar.write(f"Logged in as: {st.session_state.username} ({st.session_state.role})")
         if st.sidebar.button("Logout"):
             logout()
-        if st.session_state.role == "company":
+        role = st.session_state.role
+        if role == "company":
             company_dashboard()
-        elif st.session_state.role == "admin":
+        elif role == "admin":
             admin_dashboard()
-        elif st.session_state.role == "evaluator":
+        elif role == "evaluator":
             evaluator_dashboard()
 
 if __name__ == "__main__":
