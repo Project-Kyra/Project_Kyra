@@ -3,6 +3,7 @@ import fitz
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
+import matplotlib.pyplot as plt
 
 USERS = {
     "admin": {"password": "admin123", "role": "admin"},
@@ -35,19 +36,25 @@ def extract_pdf_text(pdf_bytes):
     except:
         return ""
 
+def min_score(val, default=10):
+    return max(val, default)
+
 def score_relevance(text):
     keywords = ["coal mining", "safety", "environmental sustainability", "energy efficiency","automation", "clean coal"]
-    return round(100 * sum(kw in text.lower() for kw in keywords) / len(keywords), 2)
+    val = round(100 * sum(kw in text.lower() for kw in keywords) / len(keywords), 2)
+    return min_score(val)
 
 def score_novelty(text):
     docs = BENCHMARKS + [text]
     tfidf = TfidfVectorizer().fit_transform(docs)
     sims = (tfidf[-1] @ tfidf[:-1].T).toarray()[0]
-    return round((1 - np.max(sims)) * 100, 2)
+    val = round((1 - np.max(sims)) * 100, 2)
+    return min_score(val)
 
 def score_technical_feasibility(text):
     keys = ["objective", "methodology", "timeline", "resources", "expertise", "partnership"]
-    return round(100 * sum(k in text.lower() for k in keys) / len(keys), 2)
+    val = round(100 * sum(k in text.lower() for k in keys) / len(keys), 2)
+    return min_score(val)
 
 def score_financial_viability(budget_df):
     issues = []
@@ -61,19 +68,22 @@ def score_financial_viability(budget_df):
     if total > 0 and first_milestone / total > milestone_limit:
         issues.append("First milestone > 40% of total budget")
     score = 100 if not issues else 50
-    return score, issues
+    return min_score(score), issues
 
 def score_impact_potential(text):
     keys = ["efficiency", "safety", "environment", "emissions", "clean energy"]
-    return round(100 * sum(k in text.lower() for k in keys) / len(keys), 2)
+    val = round(100 * sum(k in text.lower() for k in keys) / len(keys), 2)
+    return min_score(val)
 
 def score_institutional_capability(text):
     keys = ["track record", "expertise", "facility", "experience"]
-    return round(100 * sum(k in text.lower() for k in keys) / len(keys), 2)
+    val = round(100 * sum(k in text.lower() for k in keys) / len(keys), 2)
+    return min_score(val)
 
 def score_compliance_and_completeness(text):
     keys = ["forms", "annexures", "financial details", "approval", "ethical", "regulatory"]
-    return round(100 * sum(k in text.lower() for k in keys) / len(keys), 2)
+    val = round(100 * sum(k in text.lower() for k in keys) / len(keys), 2)
+    return min_score(val)
 
 def compute_weighted_score(text, budget_df):
     r1 = score_relevance(text)
@@ -127,12 +137,10 @@ def logout():
 
 def company_dashboard():
     st.header(f"Welcome, {st.session_state.username} (Company)")
-
     with st.form("submit_proposal"):
         pdf_file = st.file_uploader("Upload Proposal PDF", type=["pdf"])
         budget_file = st.file_uploader("Upload Budget CSV (with 'Amount' column)", type=["csv"])
         submitted = st.form_submit_button("Submit Proposal")
-
         if submitted:
             if not pdf_file or not budget_file:
                 st.error("Please upload both PDF and Budget CSV")
@@ -149,7 +157,6 @@ def company_dashboard():
             if "Amount" not in budget_df.columns:
                 st.error("Budget CSV must include 'Amount' column")
                 return
-
             scores = compute_weighted_score(text, budget_df)
             proposal = {
                 "id": len(st.session_state.proposals)+1,
@@ -176,31 +183,74 @@ def company_dashboard():
         if p["eval_comment"]:
             st.info(f"Evaluator Comment: {p['eval_comment']}")
 
+def plot_status_distribution(proposals):
+    from collections import Counter
+    status_counts = Counter(p["status"] for p in proposals)
+    statuses = ["Accepted", "Conditional Acceptance (Revision Needed)", "Rejected"]
+    counts = [status_counts.get(s, 0) for s in statuses]
+
+    fig, ax = plt.subplots()
+    ax.bar(statuses, counts, color=['green', 'orange', 'red'])
+    ax.set_title("Proposal Status Distribution")
+    ax.set_ylabel("Number of Proposals")
+    return fig
+
+def plot_average_scores(proposals):
+    criteria = ["Relevance", "Novelty", "Technical Feasibility",
+                "Financial Viability", "Impact", "Institutional Capability", "Compliance"]
+    if not proposals:
+        st.info("No proposals to plot scores.")
+        return None
+
+    avg_scores = {c: np.mean([p["scores"][c] for p in proposals]) for c in criteria}
+    values = list(avg_scores.values())
+    angles = np.linspace(0, 2 * np.pi, len(criteria), endpoint=False).tolist()
+    values += values[:1]
+    angles += angles[:1]
+
+    fig, ax = plt.subplots(figsize=(6,6), subplot_kw=dict(polar=True))
+    ax.plot(angles, values, 'o-', linewidth=2)
+    ax.fill(angles, values, alpha=0.25)
+    ax.set_thetagrids(np.degrees(angles[:-1]), criteria)
+    ax.set_ylim(0, 100)
+    ax.set_title("Average Proposal Scores Radar Chart")
+    return fig
+
 def admin_dashboard():
     st.header(f"Welcome, {st.session_state.username} (Admin)")
+    proposals = st.session_state.proposals
 
-    total_props = len(st.session_state.proposals)
-    accepted = len([p for p in st.session_state.proposals if p["status"] == "Accepted"])
-    conditional = len([p for p in st.session_state.proposals if "Conditional" in p["status"]])
-    rejected = len([p for p in st.session_state.proposals if p["status"] == "Rejected"])
+    total_props = len(proposals)
+    accepted = len([p for p in proposals if p["status"] == "Accepted"])
+    conditional = len([p for p in proposals if "Conditional" in p["status"]])
+    rejected = len([p for p in proposals if p["status"] == "Rejected"])
 
     st.subheader("Summary Statistics")
-    st.write(f"Total proposals submitted: {total_props}")
-    st.write(f"Accepted proposals: {accepted}")
-    st.write(f"Conditional acceptance: {conditional}")
-    st.write(f"Rejected proposals: {rejected}")
+    st.write(f"Total proposals: {total_props}")
+    st.write(f"Accepted: {accepted}")
+    st.write(f"Conditional Acceptance: {conditional}")
+    st.write(f"Rejected: {rejected}")
+
+    st.subheader("Graphs")
+    fig1 = plot_status_distribution(proposals)
+    if fig1:
+        st.pyplot(fig1)
+
+    fig2 = plot_average_scores(proposals)
+    if fig2:
+        st.pyplot(fig2)
 
     st.subheader("Proposals with Alerts")
-    alerted_props = [p for p in st.session_state.proposals if p["scores"]["Reasons"]]
-    if alerted_props:
-        for p in alerted_props:
+    alerts = [p for p in proposals if p["scores"]["Reasons"]]
+    if alerts:
+        for p in alerts:
             st.markdown(f"**Proposal #{p['id']}** by {p['user']} - Status: {p['status']}")
             st.error("Alerts: " + ", ".join(p["scores"]["Reasons"]))
     else:
-        st.write("No alerts currently.")
+        st.write("No alerts.")
 
     st.subheader("All Proposals Detail")
-    for p in st.session_state.proposals:
+    for p in proposals:
         st.markdown(f"**Proposal #{p['id']}** by {p['user']} - Status: {p['status']}")
         for k, v in p["scores"].items():
             if k not in ["Reasons", "Status"]:
@@ -210,7 +260,7 @@ def admin_dashboard():
 
 def evaluator_dashboard():
     st.header(f"Welcome, {st.session_state.username} (Evaluator)")
-    st.info("Evaluator features coming soon.")
+    st.info("Evaluator panel coming soon.")
 
 def main():
     if not st.session_state.logged_in:
@@ -219,12 +269,12 @@ def main():
         st.sidebar.write(f"Logged in as: {st.session_state.username} ({st.session_state.role})")
         if st.sidebar.button("Logout"):
             logout()
-        role = st.session_state.role
-        if role == "company":
+        r = st.session_state.role
+        if r == "company":
             company_dashboard()
-        elif role == "admin":
+        elif r == "admin":
             admin_dashboard()
-        elif role == "evaluator":
+        elif r == "evaluator":
             evaluator_dashboard()
 
 if __name__ == "__main__":
