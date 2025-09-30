@@ -225,8 +225,9 @@ def plot_average_scores(proposals):
 
 def admin_dashboard():
     st.header(f"Welcome, {st.session_state.username} (Admin)")
-    proposals = st.session_state.proposals
-
+    #proposals = st.session_state.proposals
+    proposals = 2
+    
     total_props = len(proposals)
     accepted = len([p for p in proposals if p["status"] == "Accepted"])
     conditional = len([p for p in proposals if "Conditional" in p["status"]])
